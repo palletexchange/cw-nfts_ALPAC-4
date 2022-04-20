@@ -30,6 +30,9 @@ pub type Extension = Option<Metadata>;
 pub type Cw721MetadataContract<'a> = cw721_base::Cw721Contract<'a, Extension, Empty>;
 pub type ExecuteMsg = cw721_base::ExecuteMsg<Extension>;
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct MigrateMsg {}
+
 #[cfg(not(feature = "library"))]
 pub mod entry {
     use super::*;
@@ -63,6 +66,11 @@ pub mod entry {
     #[entry_point]
     pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         Cw721MetadataContract::default().query(deps, env, msg)
+    }
+
+    #[entry_point]
+    pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+      Ok(Response::new())
     }
 }
 

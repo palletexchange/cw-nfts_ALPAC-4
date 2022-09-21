@@ -13,7 +13,9 @@ pub use crate::msg::{DarwinExecuteMsg, DarwinQueryMsg};
 use crate::query::{evolution_info, evolved_stage, holds};
 use cosmwasm_std::Empty;
 use cw721_base::Cw721Contract;
-pub use cw721_base::{ContractError, InstantiateMsg, MintMsg, MinterResponse};
+pub use cw721_base::{
+    ContractError, ExecuteMsg, InstantiateMsg, MintMsg, MinterResponse, QueryMsg,
+};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
 pub struct Trait {
@@ -45,8 +47,8 @@ pub struct Metadata {
 
 pub type MintExtension = Option<Extension<Metadata>>;
 
-pub type DarwinContract<'a> = Cw721Contract<'a, Metadata, Empty>;
-pub type ExecuteMsg = DarwinExecuteMsg<Metadata>;
+pub type DarwinContract<'a> =
+    Cw721Contract<'a, Metadata, Empty, DarwinExecuteMsg<Metadata>, DarwinQueryMsg>;
 
 #[cfg(not(feature = "library"))]
 pub mod entry {
@@ -71,22 +73,26 @@ pub mod entry {
         deps: DepsMut,
         env: Env,
         info: MessageInfo,
-        msg: ExecuteMsg,
+        msg: ExecuteMsg<Metadata, DarwinExecuteMsg<Metadata>>,
     ) -> Result<Response, ContractError> {
         let darwin_contract = DarwinContract::default();
         darwin_execute(darwin_contract, deps, env, info, msg)
     }
 
     #[entry_point]
-    pub fn query(deps: Deps, env: Env, msg: DarwinQueryMsg) -> StdResult<Binary> {
+    pub fn query(deps: Deps, env: Env, msg: QueryMsg<DarwinQueryMsg>) -> StdResult<Binary> {
         let darwin_contract = DarwinContract::default();
         match msg {
-            DarwinQueryMsg::EvolutionInfo { token_id, stage } => {
-                to_binary(&evolution_info(deps, token_id, stage)?)
-            }
-            DarwinQueryMsg::EvolvedStage { token_id } => to_binary(&evolved_stage(deps, token_id)?),
-            DarwinQueryMsg::Holds { token_id } => to_binary(&holds(deps, token_id)?),
-            _ => darwin_contract.query(deps, env, msg.into()),
+            QueryMsg::Extension { msg } => match msg {
+                DarwinQueryMsg::EvolutionInfo { token_id, stage } => {
+                    to_binary(&evolution_info(deps, token_id, stage)?)
+                }
+                DarwinQueryMsg::EvolvedStage { token_id } => {
+                    to_binary(&evolved_stage(deps, token_id)?)
+                }
+                DarwinQueryMsg::Holds { token_id } => to_binary(&holds(deps, token_id)?),
+            },
+            _ => darwin_contract.query(deps, env, msg),
         }
     }
 
@@ -158,7 +164,9 @@ mod tests {
             }],
         };
 
-        let exec_msg = ExecuteMsg::Mint(mint_msg);
+        let exec_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Mint(mint_msg),
+        };
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), exec_msg).unwrap_err();
 
         assert_eq!(
@@ -196,7 +204,9 @@ mod tests {
             }],
         };
 
-        let exec_msg = ExecuteMsg::Mint(mint_msg);
+        let exec_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Mint(mint_msg),
+        };
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), exec_msg).unwrap_err();
 
         assert_eq!(
@@ -281,7 +291,9 @@ mod tests {
             ],
         };
 
-        let exec_msg = ExecuteMsg::Mint(mint_msg.clone());
+        let exec_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Mint(mint_msg.clone()),
+        };
         entry::execute(deps.as_mut(), mock_env(), info, exec_msg).unwrap();
 
         let res = contract.nft_info(deps.as_ref(), token_id.into()).unwrap();
@@ -388,12 +400,16 @@ mod tests {
             ],
         };
 
-        let exec_msg = ExecuteMsg::Mint(mint_msg.clone());
+        let exec_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Mint(mint_msg.clone()),
+        };
         entry::execute(deps.as_mut(), mock_env(), info, exec_msg).unwrap();
 
-        let evolve_msg = ExecuteMsg::Evolve {
-            token_id: token_id.into(),
-            selected_nfts: None,
+        let evolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Evolve {
+                token_id: token_id.into(),
+                selected_nfts: None,
+            },
         };
 
         // error case. give wrong amount of native token
@@ -485,9 +501,11 @@ mod tests {
         assert_eq!(mint_msg.evolution_data[1].extension, token_info.extension);
         assert_eq!(mint_msg.evolution_data[1].token_uri, token_info.token_uri);
 
-        let evolve_msg = ExecuteMsg::Evolve {
-            token_id: token_id.into(),
-            selected_nfts: None,
+        let evolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Evolve {
+                token_id: token_id.into(),
+                selected_nfts: None,
+            },
         };
 
         let info = mock_info(
@@ -576,15 +594,17 @@ mod tests {
         assert_eq!(mint_msg.evolution_data[2].token_uri, token_info.token_uri);
 
         // devolve test
-        let devolve_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            amount: Uint128::new(30000000u128),
-            sender: "john".to_string(),
-            msg: to_binary(&Cw20HookMsg::Devolve {
-                token_id: token_id.into(),
-                selected_nfts: None,
-            })
-            .unwrap(),
-        });
+        let devolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
+                amount: Uint128::new(30000000u128),
+                sender: "john".to_string(),
+                msg: to_binary(&Cw20HookMsg::Devolve {
+                    token_id: token_id.into(),
+                    selected_nfts: None,
+                })
+                .unwrap(),
+            }),
+        };
 
         let info = mock_info("space", &[]);
 
@@ -709,7 +729,9 @@ mod tests {
             ],
         };
 
-        let exec_msg = ExecuteMsg::Mint(mint_msg.clone());
+        let exec_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Mint(mint_msg.clone()),
+        };
         entry::execute(deps.as_mut(), mock_env(), info, exec_msg).unwrap();
 
         let info = mock_info(
@@ -721,9 +743,11 @@ mod tests {
         );
 
         // error case1. try evolve without selected_nfts;
-        let evolve_msg = ExecuteMsg::Evolve {
-            token_id: token_id.into(),
-            selected_nfts: None,
+        let evolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Evolve {
+                token_id: token_id.into(),
+                selected_nfts: None,
+            },
         };
 
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), evolve_msg).unwrap_err();
@@ -736,12 +760,14 @@ mod tests {
         );
 
         // error case2. try evolve wrong selected_nfts;
-        let evolve_msg = ExecuteMsg::Evolve {
-            token_id: token_id.into(),
-            selected_nfts: Some(vec![Token::Cw721 {
-                contract_address: Addr::unchecked("Fake SpaceShip Engine"),
-                token_id: Some("Tier1 Engine".to_string()),
-            }]),
+        let evolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Evolve {
+                token_id: token_id.into(),
+                selected_nfts: Some(vec![Token::Cw721 {
+                    contract_address: Addr::unchecked("Fake SpaceShip Engine"),
+                    token_id: Some("Tier1 Engine".to_string()),
+                }]),
+            },
         };
 
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), evolve_msg).unwrap_err();
@@ -753,12 +779,14 @@ mod tests {
             )),
         );
 
-        let evolve_msg = ExecuteMsg::Evolve {
-            token_id: token_id.into(),
-            selected_nfts: Some(vec![Token::Cw721 {
-                contract_address: Addr::unchecked("SpaceShip Engine"),
-                token_id: Some("Tier1 Engine".to_string()),
-            }]),
+        let evolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Evolve {
+                token_id: token_id.into(),
+                selected_nfts: Some(vec![Token::Cw721 {
+                    contract_address: Addr::unchecked("SpaceShip Engine"),
+                    token_id: Some("Tier1 Engine".to_string()),
+                }]),
+            },
         };
 
         let res = entry::execute(deps.as_mut(), mock_env(), info.clone(), evolve_msg).unwrap();
@@ -809,15 +837,17 @@ mod tests {
         // devolve test
         let info = mock_info("space", &[]);
         // error case1. try devolve without selected_nfts;
-        let devolve_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            amount: Uint128::new(10000000u128),
-            sender: "john".to_string(),
-            msg: to_binary(&Cw20HookMsg::Devolve {
-                token_id: token_id.into(),
-                selected_nfts: None,
-            })
-            .unwrap(),
-        });
+        let devolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
+                amount: Uint128::new(10000000u128),
+                sender: "john".to_string(),
+                msg: to_binary(&Cw20HookMsg::Devolve {
+                    token_id: token_id.into(),
+                    selected_nfts: None,
+                })
+                .unwrap(),
+            }),
+        };
 
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), devolve_msg).unwrap_err();
 
@@ -827,18 +857,20 @@ mod tests {
         );
 
         // error case2. try devolve with wrong selected_nfts;
-        let devolve_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            amount: Uint128::new(10000000u128),
-            sender: "john".to_string(),
-            msg: to_binary(&Cw20HookMsg::Devolve {
-                token_id: token_id.into(),
-                selected_nfts: Some(vec![Token::Cw721 {
-                    contract_address: Addr::unchecked("Fake SpaceShip Engine"),
-                    token_id: Some("Tier1 Engine".to_string()),
-                }]),
-            })
-            .unwrap(),
-        });
+        let devolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
+                amount: Uint128::new(10000000u128),
+                sender: "john".to_string(),
+                msg: to_binary(&Cw20HookMsg::Devolve {
+                    token_id: token_id.into(),
+                    selected_nfts: Some(vec![Token::Cw721 {
+                        contract_address: Addr::unchecked("Fake SpaceShip Engine"),
+                        token_id: Some("Tier1 Engine".to_string()),
+                    }]),
+                })
+                .unwrap(),
+            }),
+        };
 
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), devolve_msg).unwrap_err();
 
@@ -847,18 +879,20 @@ mod tests {
             ContractError::Std(StdError::generic_err("Can not make key without token id")),
         );
 
-        let devolve_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            amount: Uint128::new(10000000u128),
-            sender: "john".to_string(),
-            msg: to_binary(&Cw20HookMsg::Devolve {
-                token_id: token_id.into(),
-                selected_nfts: Some(vec![Token::Cw721 {
-                    contract_address: Addr::unchecked("SpaceShip Engine"),
-                    token_id: Some("Tier1 Engine".to_string()),
-                }]),
-            })
-            .unwrap(),
-        });
+        let devolve_msg = ExecuteMsg::Extension {
+            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
+                amount: Uint128::new(10000000u128),
+                sender: "john".to_string(),
+                msg: to_binary(&Cw20HookMsg::Devolve {
+                    token_id: token_id.into(),
+                    selected_nfts: Some(vec![Token::Cw721 {
+                        contract_address: Addr::unchecked("SpaceShip Engine"),
+                        token_id: Some("Tier1 Engine".to_string()),
+                    }]),
+                })
+                .unwrap(),
+            }),
+        };
 
         let res = entry::execute(deps.as_mut(), mock_env(), info, devolve_msg).unwrap();
 

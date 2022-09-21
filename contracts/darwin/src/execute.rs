@@ -1,8 +1,6 @@
-use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use cosmwasm_schema::cw_serde;
 
-use crate::msg::{Cw20HookMsg, DarwinExecuteMsg as ExecuteMsg};
+use crate::msg::{Cw20HookMsg, DarwinExecuteMsg, DarwinQueryMsg};
 use crate::state::{
     gen_holds_key, EvolutionMetaData, Token, EVOLVED_META_DATA, EVOLVED_STAGE, HOLDS, MAX_CONDITION,
 };
@@ -16,21 +14,23 @@ use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw721::Cw721ExecuteMsg;
 
 use cw721::ContractInfoResponse;
-use cw721_base::{state::TokenInfo, ContractError, Cw721Contract, InstantiateMsg, MintMsg};
+use cw721_base::{
+    state::TokenInfo, ContractError, Cw721Contract, ExecuteMsg, InstantiateMsg, MintMsg,
+};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:darwin";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+#[cw_serde]
 pub struct Extension<T> {
     pub devolved_extension: T,
     pub evolved_extension: T,
     pub evolve_conditions: Vec<Token>,
 }
 
-pub fn instantiate<T: Serialize + DeserializeOwned + Clone>(
-    contract: Cw721Contract<T, Empty>,
+pub fn instantiate(
+    contract: Cw721Contract<Metadata, Empty, DarwinExecuteMsg<Metadata>, DarwinQueryMsg>,
     deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
@@ -51,52 +51,57 @@ pub fn instantiate<T: Serialize + DeserializeOwned + Clone>(
 }
 
 pub fn execute(
-    contract: Cw721Contract<Metadata, Empty>,
+    contract: Cw721Contract<Metadata, Empty, DarwinExecuteMsg<Metadata>, DarwinQueryMsg>,
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
-    msg: ExecuteMsg<Metadata>,
+    msg: ExecuteMsg<Metadata, DarwinExecuteMsg<Metadata>>,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::<Metadata>::Evolve {
-            token_id,
-            selected_nfts,
-        } => evolve(
-            contract,
-            deps,
-            env,
-            info,
-            token_id,
-            selected_nfts.unwrap_or_default(),
-        ),
-        ExecuteMsg::<Metadata>::Mint(msg) => {
-            let len = msg.evolution_data.len();
-            for index in 0..len {
-                add_meta_data(
-                    deps.storage,
-                    &msg.token_id,
-                    index as u8,
-                    &msg.evolution_data[index],
-                )?;
+        ExecuteMsg::Extension { msg } => match msg {
+            DarwinExecuteMsg::Evolve {
+                token_id,
+                selected_nfts,
+            } => evolve(
+                contract,
+                deps,
+                env,
+                info,
+                token_id,
+                selected_nfts.unwrap_or_default(),
+            ),
+            DarwinExecuteMsg::Mint(msg) => {
+                let len = msg.evolution_data.len();
+                for index in 0..len {
+                    add_meta_data(
+                        deps.storage,
+                        &msg.token_id,
+                        index as u8,
+                        &msg.evolution_data[index],
+                    )?;
+                }
+                EVOLVED_STAGE.save(deps.storage, &msg.token_id, &0u8)?;
+
+                let cw721_base_mint_msg = MintMsg::<Metadata> {
+                    owner: msg.owner,
+                    token_id: msg.token_id,
+                    token_uri: msg.evolution_data[0].token_uri.clone(),
+                    extension: msg.evolution_data[0].extension.clone(),
+                };
+
+                contract.mint(deps, env, info, cw721_base_mint_msg)
             }
-            EVOLVED_STAGE.save(deps.storage, &msg.token_id, &0u8)?;
-
-            let cw721_base_mint_msg = MintMsg::<Metadata> {
-                owner: msg.owner,
-                token_id: msg.token_id,
-                token_uri: msg.evolution_data[0].token_uri.clone(),
-                extension: msg.evolution_data[0].extension.clone(),
-            };
-
-            contract.mint(deps, env, info, cw721_base_mint_msg)
-        }
-        ExecuteMsg::<Metadata>::Receive(msg) => receive(contract, deps, env, info, msg),
-        _ => contract.execute(deps, env, info, msg.into()),
+            DarwinExecuteMsg::Receive(msg) => receive(contract, deps, env, info, msg),
+        },
+        ExecuteMsg::Mint(_msg) => Err(ContractError::Std(StdError::generic_err(
+            "Use extension min instead",
+        ))),
+        _ => contract.execute(deps, env, info, msg),
     }
 }
 
 pub fn evolve(
-    contract: Cw721Contract<Metadata, Empty>,
+    contract: Cw721Contract<Metadata, Empty, DarwinExecuteMsg<Metadata>, DarwinQueryMsg>,
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -234,7 +239,7 @@ pub fn evolve(
 }
 
 pub fn receive(
-    contract: Cw721Contract<Metadata, Empty>,
+    contract: Cw721Contract<Metadata, Empty, DarwinExecuteMsg<Metadata>, DarwinQueryMsg>,
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,

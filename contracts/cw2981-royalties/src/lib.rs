@@ -1,18 +1,21 @@
 pub mod msg;
 pub mod query;
 
-use cosmwasm_std::to_binary;
 pub use query::{check_royalties, query_royalties_info};
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-use crate::msg::Cw2981QueryMsg;
-use cosmwasm_std::Empty;
+use cosmwasm_schema::cw_serde;
+use cosmwasm_std::{to_binary, Empty};
+use cw2::set_contract_version;
 use cw721_base::Cw721Contract;
 pub use cw721_base::{ContractError, InstantiateMsg, MintMsg, MinterResponse};
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+use crate::msg::Cw2981QueryMsg;
+
+// Version info for migration
+const CONTRACT_NAME: &str = "crates.io:cw2981-royalties";
+const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cw_serde]
 pub struct Trait {
     pub display_type: Option<String>,
     pub trait_type: String,
@@ -20,7 +23,8 @@ pub struct Trait {
 }
 
 // see: https://docs.opensea.io/docs/metadata-standards
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+#[cw_serde]
+#[derive(Default)]
 pub struct Metadata {
     pub image: Option<String>,
     pub image_data: Option<String>,
@@ -44,8 +48,9 @@ pub type Extension = Option<Metadata>;
 
 pub type MintExtension = Option<Extension>;
 
-pub type Cw2981Contract<'a> = Cw721Contract<'a, Extension, Empty>;
-pub type ExecuteMsg = cw721_base::ExecuteMsg<Extension>;
+pub type Cw2981Contract<'a> = Cw721Contract<'a, Extension, Empty, Empty, Cw2981QueryMsg>;
+pub type ExecuteMsg = cw721_base::ExecuteMsg<Extension, Empty>;
+pub type QueryMsg = cw721_base::QueryMsg<Cw2981QueryMsg>;
 
 #[cfg(not(feature = "library"))]
 pub mod entry {
@@ -56,12 +61,16 @@ pub mod entry {
 
     #[entry_point]
     pub fn instantiate(
-        deps: DepsMut,
+        mut deps: DepsMut,
         env: Env,
         info: MessageInfo,
         msg: InstantiateMsg,
-    ) -> StdResult<Response> {
-        Cw2981Contract::default().instantiate(deps, env, info, msg)
+    ) -> Result<Response, ContractError> {
+        let res = Cw2981Contract::default().instantiate(deps.branch(), env, info, msg)?;
+        // Explicitly set contract name and version, otherwise set to cw721-base info
+        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)
+            .map_err(ContractError::Std)?;
+        Ok(res)
     }
 
     #[entry_point]
@@ -75,14 +84,16 @@ pub mod entry {
     }
 
     #[entry_point]
-    pub fn query(deps: Deps, env: Env, msg: Cw2981QueryMsg) -> StdResult<Binary> {
+    pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         match msg {
-            Cw2981QueryMsg::RoyaltyInfo {
-                token_id,
-                sale_price,
-            } => to_binary(&query_royalties_info(deps, token_id, sale_price)?),
-            Cw2981QueryMsg::CheckRoyalties {} => to_binary(&check_royalties(deps)?),
-            _ => Cw2981Contract::default().query(deps, env, msg.into()),
+            QueryMsg::Extension { msg } => match msg {
+                Cw2981QueryMsg::RoyaltyInfo {
+                    token_id,
+                    sale_price,
+                } => to_binary(&query_royalties_info(deps, token_id, sale_price)?),
+                Cw2981QueryMsg::CheckRoyalties {} => to_binary(&check_royalties(deps)?),
+            },
+            _ => Cw2981Contract::default().query(deps, env, msg),
         }
     }
 }
@@ -165,7 +176,9 @@ mod tests {
         assert_eq!(res, expected);
 
         // also check the longhand way
-        let query_msg = Cw2981QueryMsg::CheckRoyalties {};
+        let query_msg = QueryMsg::Extension {
+            msg: Cw2981QueryMsg::CheckRoyalties {},
+        };
         let query_res: CheckRoyaltiesResponse =
             from_binary(&entry::query(deps.as_ref(), mock_env(), query_msg).unwrap()).unwrap();
         assert_eq!(query_res, expected);
@@ -208,9 +221,11 @@ mod tests {
         assert_eq!(res, expected);
 
         // also check the longhand way
-        let query_msg = Cw2981QueryMsg::RoyaltyInfo {
-            token_id: token_id.to_string(),
-            sale_price: Uint128::new(100),
+        let query_msg = QueryMsg::Extension {
+            msg: Cw2981QueryMsg::RoyaltyInfo {
+                token_id: token_id.to_string(),
+                sale_price: Uint128::new(100),
+            },
         };
         let query_res: RoyaltiesInfoResponse =
             from_binary(&entry::query(deps.as_ref(), mock_env(), query_msg).unwrap()).unwrap();

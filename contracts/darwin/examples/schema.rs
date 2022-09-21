@@ -7,7 +7,7 @@ use cw721::{
     AllNftInfoResponse, ContractInfoResponse, NftInfoResponse, NumTokensResponse,
     OperatorsResponse, OwnerOfResponse, TokensResponse,
 };
-use cw721_base::{InstantiateMsg, MinterResponse, QueryMsg};
+use cw721_base::{ExecuteMsg, InstantiateMsg, MinterResponse, QueryMsg};
 
 use darwin::msg::{EvolutionInfoResponse, EvolvedStageResponse, HoldsResponse};
 use darwin::{DarwinExecuteMsg, DarwinQueryMsg, Metadata};
@@ -20,11 +20,11 @@ fn main() {
 
     export_schema(&schema_for!(InstantiateMsg), &out_dir);
     export_schema_with_title(
-        &schema_for!(DarwinExecuteMsg<Metadata>),
+        &schema_for!(ExecuteMsg<Metadata, DarwinExecuteMsg<Metadata>>),
         &out_dir,
         "ExecuteMsg",
     );
-    export_schema(&schema_for!(QueryMsg), &out_dir);
+    export_schema(&schema_for!(QueryMsg<DarwinQueryMsg>), &out_dir);
     export_schema_with_title(
         &schema_for!(AllNftInfoResponse<Metadata>),
         &out_dir,
@@ -41,7 +41,6 @@ fn main() {
     export_schema(&schema_for!(NumTokensResponse), &out_dir);
     export_schema(&schema_for!(OwnerOfResponse), &out_dir);
     export_schema(&schema_for!(TokensResponse), &out_dir);
-    export_schema(&schema_for!(DarwinQueryMsg), &out_dir);
     export_schema(&schema_for!(EvolvedStageResponse), &out_dir);
     export_schema(&schema_for!(EvolutionInfoResponse<Metadata>), &out_dir);
     export_schema(&schema_for!(HoldsResponse), &out_dir);

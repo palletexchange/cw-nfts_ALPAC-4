@@ -23,7 +23,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -52,7 +53,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -87,7 +89,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -112,7 +115,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -143,7 +147,8 @@
             "operator": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -164,7 +169,8 @@
             "operator": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -177,7 +183,7 @@
       ],
       "properties": {
         "mint": {
-          "$ref": "#/definitions/DarwinMintMsg_for_Metadata"
+          "$ref": "#/definitions/MintMsg_for_Metadata"
         }
       },
       "additionalProperties": false
@@ -198,50 +204,30 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
     },
     {
-      "description": "Evolve nft",
+      "description": "Extension msg",
       "type": "object",
       "required": [
-        "evolve"
+        "extension"
       ],
       "properties": {
-        "evolve": {
+        "extension": {
           "type": "object",
           "required": [
-            "token_id"
+            "msg"
           ],
           "properties": {
-            "selected_nfts": {
-              "description": "Need to pick specific NFT for conditions that token_id is None",
-              "type": [
-                "array",
-                "null"
-              ],
-              "items": {
-                "$ref": "#/definitions/Token"
-              }
-            },
-            "token_id": {
-              "type": "string"
+            "msg": {
+              "$ref": "#/definitions/DarwinExecuteMsg_for_Metadata"
             }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "receive"
-      ],
-      "properties": {
-        "receive": {
-          "$ref": "#/definitions/Cw20ReceiveMsg"
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -274,7 +260,70 @@
         "sender": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "DarwinExecuteMsg_for_Metadata": {
+      "description": "This is like Cw721ExecuteMsg but we add a Mint command for an owner to make this stand-alone. You will likely want to remove mint and use other control logic in any contract that inherits this.",
+      "oneOf": [
+        {
+          "description": "Mint a new NFT, can only be called by the contract minter",
+          "type": "object",
+          "required": [
+            "mint"
+          ],
+          "properties": {
+            "mint": {
+              "$ref": "#/definitions/DarwinMintMsg_for_Metadata"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Evolve nft",
+          "type": "object",
+          "required": [
+            "evolve"
+          ],
+          "properties": {
+            "evolve": {
+              "type": "object",
+              "required": [
+                "token_id"
+              ],
+              "properties": {
+                "selected_nfts": {
+                  "description": "Need to pick specific NFT for conditions that token_id is None",
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "$ref": "#/definitions/Token"
+                  }
+                },
+                "token_id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "receive"
+          ],
+          "properties": {
+            "receive": {
+              "$ref": "#/definitions/Cw20ReceiveMsg"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "DarwinMintMsg_for_Metadata": {
       "type": "object",
@@ -299,7 +348,8 @@
           "description": "Unique ID of the NFT",
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "EvolutionFee": {
       "type": "object",
@@ -391,7 +441,8 @@
           ],
           "properties": {
             "never": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -475,6 +526,40 @@
           ]
         }
       }
+    },
+    "MintMsg_for_Metadata": {
+      "type": "object",
+      "required": [
+        "extension",
+        "owner",
+        "token_id"
+      ],
+      "properties": {
+        "extension": {
+          "description": "Any custom extension used by this contract",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Metadata"
+            }
+          ]
+        },
+        "owner": {
+          "description": "The owner of the newly minter NFT",
+          "type": "string"
+        },
+        "token_id": {
+          "description": "Unique ID of the NFT",
+          "type": "string"
+        },
+        "token_uri": {
+          "description": "Universal resource identifier for this NFT Should point to a JSON file that conforms to the ERC721 Metadata JSON Schema",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "Timestamp": {
       "description": "A point in time in nanosecond precision.\n\nThis type can represent times from 1970-01-01T00:00:00Z to 2554-07-21T23:34:33Z.\n\n## Examples\n\n``` # use cosmwasm_std::Timestamp; let ts = Timestamp::from_nanos(1_000_000_202); assert_eq!(ts.nanos(), 1_000_000_202); assert_eq!(ts.seconds(), 1); assert_eq!(ts.subsec_nanos(), 202);\n\nlet ts = ts.plus_seconds(2); assert_eq!(ts.nanos(), 3_000_000_202); assert_eq!(ts.seconds(), 3); assert_eq!(ts.subsec_nanos(), 202); ```",

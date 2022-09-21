@@ -1,10 +1,13 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
+use cosmwasm_schema::cw_serde;
 use cosmwasm_std::Empty;
-pub use cw721_base::{ContractError, InstantiateMsg, MintMsg, MinterResponse, QueryMsg};
+use cw2::set_contract_version;
+pub use cw721_base::{ContractError, InstantiateMsg, MintMsg, MinterResponse};
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+// Version info for migration
+const CONTRACT_NAME: &str = "crates.io:cw721-metadata-onchain";
+const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cw_serde]
 pub struct Trait {
     pub display_type: Option<String>,
     pub trait_type: String,
@@ -12,7 +15,8 @@ pub struct Trait {
 }
 
 // see: https://docs.opensea.io/docs/metadata-standards
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+#[cw_serde]
+#[derive(Default)]
 pub struct Metadata {
     pub image: Option<String>,
     pub image_data: Option<String>,
@@ -27,8 +31,9 @@ pub struct Metadata {
 
 pub type Extension = Option<Metadata>;
 
-pub type Cw721MetadataContract<'a> = cw721_base::Cw721Contract<'a, Extension, Empty>;
-pub type ExecuteMsg = cw721_base::ExecuteMsg<Extension>;
+pub type Cw721MetadataContract<'a> = cw721_base::Cw721Contract<'a, Extension, Empty, Empty, Empty>;
+pub type ExecuteMsg = cw721_base::ExecuteMsg<Extension, Empty>;
+pub type QueryMsg = cw721_base::QueryMsg<Empty>;
 
 #[cfg(not(feature = "library"))]
 pub mod entry {
@@ -37,17 +42,19 @@ pub mod entry {
     use cosmwasm_std::entry_point;
     use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
 
-    // This is a simple type to let us handle empty extensions
-
     // This makes a conscious choice on the various generics used by the contract
     #[entry_point]
     pub fn instantiate(
-        deps: DepsMut,
+        mut deps: DepsMut,
         env: Env,
         info: MessageInfo,
         msg: InstantiateMsg,
-    ) -> StdResult<Response> {
-        Cw721MetadataContract::default().instantiate(deps, env, info, msg)
+    ) -> Result<Response, ContractError> {
+        let res = Cw721MetadataContract::default().instantiate(deps.branch(), env, info, msg)?;
+        // Explicitly set contract name and version, otherwise set to cw721-base info
+        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)
+            .map_err(ContractError::Std)?;
+        Ok(res)
     }
 
     #[entry_point]

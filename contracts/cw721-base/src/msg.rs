@@ -1,10 +1,8 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
+use cosmwasm_schema::cw_serde;
 use cosmwasm_std::Binary;
 use cw721::Expiration;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct InstantiateMsg {
     /// Name of the NFT contract
     pub name: String,
@@ -20,9 +18,8 @@ pub struct InstantiateMsg {
 /// This is like Cw721ExecuteMsg but we add a Mint command for an owner
 /// to make this stand-alone. You will likely want to remove mint and
 /// use other control logic in any contract that inherits this.
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecuteMsg<T> {
+#[cw_serde]
+pub enum ExecuteMsg<T, E> {
     /// Transfer is a base message to move a token to another account without triggering actions
     TransferNft { recipient: String, token_id: String },
     /// Send is a base message to transfer a token to a contract and trigger an action
@@ -55,9 +52,12 @@ pub enum ExecuteMsg<T> {
 
     /// Burn an NFT the sender has access to
     Burn { token_id: String },
+
+    /// Extension msg
+    Extension { msg: E },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[cw_serde]
 pub struct MintMsg<T> {
     /// Unique ID of the NFT
     pub token_id: String,
@@ -71,9 +71,8 @@ pub struct MintMsg<T> {
     pub extension: T,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum QueryMsg {
+#[cw_serde]
+pub enum QueryMsg<Q> {
     /// Return the owner of the given token, error if token does not exist
     /// Return type: OwnerOfResponse
     OwnerOf {
@@ -81,7 +80,6 @@ pub enum QueryMsg {
         /// unset or false will filter out expired approvals, you must set to true to see them
         include_expired: Option<bool>,
     },
-
     /// Return operator that can access all of the owner's tokens.
     /// Return type: `ApprovalResponse`
     Approval {
@@ -89,14 +87,12 @@ pub enum QueryMsg {
         spender: String,
         include_expired: Option<bool>,
     },
-
     /// Return approvals that a token has
     /// Return type: `ApprovalsResponse`
     Approvals {
         token_id: String,
         include_expired: Option<bool>,
     },
-
     /// List all operators that can access all of the owner's tokens
     /// Return type: `OperatorsResponse`
     AllOperators {
@@ -145,10 +141,15 @@ pub enum QueryMsg {
 
     // Return the minter
     Minter {},
+
+    /// Extension query
+    Extension {
+        msg: Q,
+    },
 }
 
 /// Shows who can mint these tokens
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[cw_serde]
 pub struct MinterResponse {
     pub minter: String,
 }

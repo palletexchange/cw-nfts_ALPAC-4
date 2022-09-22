@@ -94,7 +94,7 @@ pub fn execute(
             DarwinExecuteMsg::Receive(msg) => receive(contract, deps, env, info, msg),
         },
         ExecuteMsg::Mint(_msg) => Err(ContractError::Std(StdError::generic_err(
-            "Use extension min instead",
+            "Use extension mint instead",
         ))),
         _ => contract.execute(deps, env, info, msg),
     }

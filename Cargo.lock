@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "darwin"
-version = "0.13.2"
+version = "0.15.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -330,7 +330,6 @@ dependencies = [
  "cw721-base",
  "schemars",
  "serde",
- "thiserror",
 ]
 
 [[package]]

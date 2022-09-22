@@ -108,13 +108,13 @@ pub mod entry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::msg::{Cw20HookMsg, DarwinMintMsg};
+    use crate::msg::DarwinMintMsg;
     use crate::state::{EvolutionFee, EvolutionMetaData, Token, MAX_CONDITION};
 
     use cosmwasm_std::{Addr, Coin, CosmosMsg, StdError, SubMsg, Uint128, WasmMsg};
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+    use cw20::Cw20ExecuteMsg;
     use cw721::{Cw721ExecuteMsg, Cw721Query};
 
     const CREATOR: &str = "creator";
@@ -595,20 +595,15 @@ mod tests {
 
         // devolve test
         let devolve_msg = ExecuteMsg::Extension {
-            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
-                amount: Uint128::new(30000000u128),
-                sender: "john".to_string(),
-                msg: to_binary(&Cw20HookMsg::Devolve {
-                    token_id: token_id.into(),
-                    selected_nfts: None,
-                })
-                .unwrap(),
-            }),
+            msg: DarwinExecuteMsg::Devolve {
+                token_id: token_id.into(),
+                selected_nfts: None,
+            },
         };
 
-        let info = mock_info("space", &[]);
+        let info = mock_info("john", &[]);
 
-        let res = entry::execute(deps.as_mut(), mock_env(), info, devolve_msg).unwrap();
+        let res = entry::execute(deps.as_mut(), mock_env(), info.clone(), devolve_msg).unwrap();
 
         assert_eq!(
             res.messages,
@@ -619,7 +614,8 @@ mod tests {
                         .evolution_fee
                         .fee_token
                         .to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    msg: to_binary(&Cw20ExecuteMsg::TransferFrom {
+                        owner: info.sender.to_string(),
                         recipient: mint_msg.evolution_data[2]
                             .evolution_fee
                             .fee_recipient
@@ -835,18 +831,13 @@ mod tests {
         );
 
         // devolve test
-        let info = mock_info("space", &[]);
+        let info = mock_info("john", &[]);
         // error case1. try devolve without selected_nfts;
         let devolve_msg = ExecuteMsg::Extension {
-            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
-                amount: Uint128::new(10000000u128),
-                sender: "john".to_string(),
-                msg: to_binary(&Cw20HookMsg::Devolve {
-                    token_id: token_id.into(),
-                    selected_nfts: None,
-                })
-                .unwrap(),
-            }),
+            msg: DarwinExecuteMsg::Devolve {
+                token_id: token_id.into(),
+                selected_nfts: None,
+            },
         };
 
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), devolve_msg).unwrap_err();
@@ -858,18 +849,13 @@ mod tests {
 
         // error case2. try devolve with wrong selected_nfts;
         let devolve_msg = ExecuteMsg::Extension {
-            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
-                amount: Uint128::new(10000000u128),
-                sender: "john".to_string(),
-                msg: to_binary(&Cw20HookMsg::Devolve {
-                    token_id: token_id.into(),
-                    selected_nfts: Some(vec![Token::Cw721 {
-                        contract_address: Addr::unchecked("Fake SpaceShip Engine"),
-                        token_id: Some("Tier1 Engine".to_string()),
-                    }]),
-                })
-                .unwrap(),
-            }),
+            msg: DarwinExecuteMsg::Devolve {
+                token_id: token_id.into(),
+                selected_nfts: Some(vec![Token::Cw721 {
+                    contract_address: Addr::unchecked("Fake SpaceShip Engine"),
+                    token_id: Some("Tier1 Engine".to_string()),
+                }]),
+            },
         };
 
         let err = entry::execute(deps.as_mut(), mock_env(), info.clone(), devolve_msg).unwrap_err();
@@ -880,21 +866,16 @@ mod tests {
         );
 
         let devolve_msg = ExecuteMsg::Extension {
-            msg: DarwinExecuteMsg::Receive(Cw20ReceiveMsg {
-                amount: Uint128::new(10000000u128),
-                sender: "john".to_string(),
-                msg: to_binary(&Cw20HookMsg::Devolve {
-                    token_id: token_id.into(),
-                    selected_nfts: Some(vec![Token::Cw721 {
-                        contract_address: Addr::unchecked("SpaceShip Engine"),
-                        token_id: Some("Tier1 Engine".to_string()),
-                    }]),
-                })
-                .unwrap(),
-            }),
+            msg: DarwinExecuteMsg::Devolve {
+                token_id: token_id.into(),
+                selected_nfts: Some(vec![Token::Cw721 {
+                    contract_address: Addr::unchecked("SpaceShip Engine"),
+                    token_id: Some("Tier1 Engine".to_string()),
+                }]),
+            },
         };
 
-        let res = entry::execute(deps.as_mut(), mock_env(), info, devolve_msg).unwrap();
+        let res = entry::execute(deps.as_mut(), mock_env(), info.clone(), devolve_msg).unwrap();
 
         assert_eq!(
             res.messages,
@@ -905,7 +886,8 @@ mod tests {
                         .evolution_fee
                         .fee_token
                         .to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    msg: to_binary(&Cw20ExecuteMsg::TransferFrom {
+                        owner: info.sender.to_string(),
                         recipient: mint_msg.evolution_data[1]
                             .evolution_fee
                             .fee_recipient

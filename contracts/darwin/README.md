@@ -36,11 +36,16 @@ pub struct EvolutionFee {
 }
 ```
 
+* Disable origin `Mint` msg, use `Mint` msg of extension instead.
+
 `evolution_conditions` is a list of tokens required to execute evolve. `TokenInfo` initially sets the data of `evolution_data[0]`
 
 ## New Execute msgs
 
 ```rust
+/// Mint a new NFT, can only be called by the contract minter
+Mint(DarwinMintMsg<T>),
+
 /// Evolve nft
 Evolve {
     token_id: String,
@@ -48,21 +53,17 @@ Evolve {
     selected_nfts: Option<Vec<Token>>,
 },
 
-Receive(Cw20ReceiveMsg),
-
-pub enum Cw20HookMsg {
-    /// Devolve NFT
-    Devolve {
-        token_id: String,
-        /// Need to pick specific NFT for conditions that token_id is None
-        selected_nfts: Option<Vec<Token>>,
-    },
-}
+/// Devolve NFT
+Devolve {
+    token_id: String,
+    /// Need to pick specific NFT for conditions that token_id is None
+    selected_nfts: Option<Vec<Token>>,
+},
 ```
 
 `Evolve` is execute function that evolve NFT. `TokenInfo` will change to the next `stage` data. Msg sender need to do `IncreaseAllowance` for CW-20 of `fee_token` and `evolution_conditions` and do `Approve` for CW-721 of `evolution_conditions` to Darwin Nft contract. Also need to add native of `evolution_conditions` to `funds` when execute msg.
 
-`Devolve` is execute function that devolve NFT. `TokenInfo` will change to former `stage` data. The tokens used for evolution are returned to the owner of NFT.
+`Devolve` is execute function that devolve NFT. Msg sender need to do `IncreaseAllowance` for CW-20 of `fee_token`. `TokenInfo` will change to former `stage` data. The tokens used for evolution are returned to the owner of NFT.
 
 `selected_nfts` is required to select CW-721 tokens to use for evolution/withdraw(when devolve) if the token_ids of some CW-721 tokens in `evolution_condition` are `None` have not been determined.
 

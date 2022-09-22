@@ -1,16 +1,16 @@
 use cosmwasm_schema::cw_serde;
 
-use crate::msg::{Cw20HookMsg, DarwinExecuteMsg, DarwinQueryMsg};
+use crate::msg::{DarwinExecuteMsg, DarwinQueryMsg};
 use crate::state::{
     gen_holds_key, EvolutionMetaData, Token, EVOLVED_META_DATA, EVOLVED_STAGE, HOLDS, MAX_CONDITION,
 };
 use crate::Metadata;
 use cosmwasm_std::{
-    from_binary, to_binary, CosmosMsg, DepsMut, Empty, Env, MessageInfo, Response, StdError,
+    to_binary, CosmosMsg, DepsMut, Empty, Env, MessageInfo, Response, StdError,
     StdResult, Storage, WasmMsg,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw20::Cw20ExecuteMsg;
 use cw721::Cw721ExecuteMsg;
 
 use cw721::ContractInfoResponse;
@@ -70,6 +70,17 @@ pub fn execute(
                 token_id,
                 selected_nfts.unwrap_or_default(),
             ),
+            DarwinExecuteMsg::Devolve {
+                token_id,
+                selected_nfts,
+            } => devolve(
+                contract,
+                deps,
+                env,
+                info,
+                token_id,
+                selected_nfts.unwrap_or_default(),
+            ),
             DarwinExecuteMsg::Mint(msg) => {
                 let len = msg.evolution_data.len();
                 for index in 0..len {
@@ -91,7 +102,6 @@ pub fn execute(
 
                 contract.mint(deps, env, info, cw721_base_mint_msg)
             }
-            DarwinExecuteMsg::Receive(msg) => receive(contract, deps, env, info, msg),
         },
         ExecuteMsg::Mint(_msg) => Err(ContractError::Std(StdError::generic_err(
             "Use extension mint instead",
@@ -238,117 +248,100 @@ pub fn evolve(
         .add_messages(extract_msgs))
 }
 
-pub fn receive(
+pub fn devolve(
     contract: Cw721Contract<Metadata, Empty, DarwinExecuteMsg<Metadata>, DarwinQueryMsg>,
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    msg: Cw20ReceiveMsg,
+    token_id: String,
+    selected_nfts: Vec<Token>,
 ) -> Result<Response, ContractError> {
-    let contract_address = info.sender;
-    let amount = msg.amount;
-    let sender = deps.api.addr_validate(&msg.sender)?;
-    let msg = from_binary::<Cw20HookMsg>(&msg.msg)?;
+    let owner = contract.tokens.load(deps.storage, &token_id)?.owner;
 
-    match msg {
-        Cw20HookMsg::Devolve {
-            token_id,
-            selected_nfts,
-        } => {
-            let mut selected_nfts = selected_nfts.unwrap_or_default();
-            let owner = contract.tokens.load(deps.storage, &token_id)?.owner;
+    if owner != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
 
-            if owner != sender {
-                return Err(ContractError::Unauthorized {});
-            }
+    let mut selected_nfts = selected_nfts;
 
-            let evolved_stage = EVOLVED_STAGE.load(deps.storage, &token_id)?;
+    let evolved_stage = EVOLVED_STAGE.load(deps.storage, &token_id)?;
 
-            if evolved_stage == 0 {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Can not devolve stage 0",
-                )));
-            }
+    if evolved_stage == 0 {
+        return Err(ContractError::Std(StdError::generic_err(
+            "Can not devolve stage 0",
+        )));
+    }
 
-            let evolved_metadata =
-                EVOLVED_META_DATA.load(deps.storage, (&token_id, evolved_stage))?;
+    let evolved_metadata =
+        EVOLVED_META_DATA.load(deps.storage, (&token_id, evolved_stage))?;
 
-            if contract_address != evolved_metadata.evolution_fee.fee_token
-                || amount != evolved_metadata.evolution_fee.devolve_fee_amount
-            {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Evolve fee token mismatch",
-                )));
-            }
+    let fee_send_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: evolved_metadata.evolution_fee.fee_token.to_string(),
+        msg: to_binary(&Cw20ExecuteMsg::TransferFrom {
+            owner: info.sender.to_string(),
+            recipient: evolved_metadata.evolution_fee.fee_recipient.to_string(),
+            amount: evolved_metadata.evolution_fee.devolve_fee_amount,
+        })?,
+        funds: vec![],
+    });
 
-            let fee_send_msg: CosmosMsg = CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: evolved_metadata.evolution_fee.fee_token.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: evolved_metadata.evolution_fee.fee_recipient.to_string(),
-                    amount: evolved_metadata.evolution_fee.devolve_fee_amount,
-                })?,
-                funds: vec![],
-            });
+    let new_meatadata =
+        EVOLVED_META_DATA.load(deps.storage, (&token_id, (evolved_stage - 1)))?;
 
-            let new_meatadata =
-                EVOLVED_META_DATA.load(deps.storage, (&token_id, (evolved_stage - 1)))?;
+    let EvolutionMetaData::<Metadata> {
+        token_uri,
+        extension,
+        evolution_conditions,
+        ..
+    } = new_meatadata;
 
-            let EvolutionMetaData::<Metadata> {
+    // update nft info
+    contract
+        .tokens
+        .update(deps.storage, &token_id, |old| match old {
+            Some(token) => Ok(TokenInfo::<Metadata> {
+                owner: token.owner,
+                approvals: token.approvals,
                 token_uri,
                 extension,
-                evolution_conditions,
-                ..
-            } = new_meatadata;
+            }),
+            None => Err(ContractError::Std(StdError::generic_err("Token not found"))),
+        })?;
 
-            // update nft info
-            contract
-                .tokens
-                .update(deps.storage, &token_id, |old| match old {
-                    Some(token) => Ok(TokenInfo::<Metadata> {
-                        owner: token.owner,
-                        approvals: token.approvals,
-                        token_uri,
-                        extension,
-                    }),
-                    None => Err(ContractError::Std(StdError::generic_err("Token not found"))),
-                })?;
-
-            let mut withdraw_msgs: Vec<CosmosMsg> = vec![];
-            for mut withdraw_token in evolution_conditions {
+    let mut withdraw_msgs: Vec<CosmosMsg> = vec![];
+    for mut withdraw_token in evolution_conditions {
+        if let Token::Cw721 {
+            contract_address,
+            token_id: _,
+        } = withdraw_token.clone()
+        {
+            let len = selected_nfts.len();
+            for index in 0..len {
                 if let Token::Cw721 {
-                    contract_address,
+                    contract_address: selected_contract_address,
                     token_id: _,
-                } = withdraw_token.clone()
+                } = selected_nfts[index].clone()
                 {
-                    let len = selected_nfts.len();
-                    for index in 0..len {
-                        if let Token::Cw721 {
-                            contract_address: selected_contract_address,
-                            token_id: _,
-                        } = selected_nfts[index].clone()
-                        {
-                            if contract_address == selected_contract_address {
-                                withdraw_token = selected_nfts.remove(index);
-                                break;
-                            }
-                        }
+                    if contract_address == selected_contract_address {
+                        withdraw_token = selected_nfts.remove(index);
+                        break;
                     }
                 }
-                withdraw_msgs.push(
-                    withdraw(deps.storage, &token_id, withdraw_token)?
-                        .into_send_msg(sender.to_string())?,
-                )
             }
-
-            EVOLVED_STAGE.save(deps.storage, &token_id, &(evolved_stage - 1))?;
-
-            Ok(Response::new()
-                .add_attribute("action", "devolve")
-                .add_attribute("token_id", token_id)
-                .add_message(fee_send_msg)
-                .add_messages(withdraw_msgs))
         }
+        withdraw_msgs.push(
+            withdraw(deps.storage, &token_id, withdraw_token)?
+                .into_send_msg(owner.to_string())?,
+        )
     }
+
+    EVOLVED_STAGE.save(deps.storage, &token_id, &(evolved_stage - 1))?;
+
+    Ok(Response::new()
+        .add_attribute("action", "devolve")
+        .add_attribute("token_id", token_id)
+        .add_message(fee_send_msg)
+        .add_messages(withdraw_msgs))
 }
 
 fn add_meta_data(
@@ -525,6 +518,11 @@ fn withdraw(
     {
         if token_id.is_none() {
             return Err(StdError::generic_err("Can't deposit without token_id"));
+        }
+        // check hold
+        let hold = HOLDS.may_load(storage, key.clone())?;
+        if hold.is_none() {
+            return Err(StdError::generic_err("Can't withdraw nft not held by token_id")); 
         }
         HOLDS.remove(storage, key)
     }

@@ -1,6 +1,5 @@
 use cosmwasm_schema::cw_serde;
 
-use cw20::Cw20ReceiveMsg;
 use cw721::CustomMsg;
 
 use crate::state::{EvolutionMetaData, Token};
@@ -28,7 +27,12 @@ pub enum DarwinExecuteMsg<T> {
         selected_nfts: Option<Vec<Token>>,
     },
 
-    Receive(Cw20ReceiveMsg),
+    /// Devolve NFT
+    Devolve {
+        token_id: String,
+        /// Need to pick specific NFT for conditions that token_id is None
+        selected_nfts: Option<Vec<Token>>,
+    },
 }
 
 impl CustomMsg for DarwinExecuteMsg<Metadata> {}
@@ -42,16 +46,6 @@ pub struct DarwinMintMsg<T> {
 
     /// Set of data for each evolved stage
     pub evolution_data: Vec<EvolutionMetaData<T>>,
-}
-
-#[cw_serde]
-pub enum Cw20HookMsg {
-    /// Devolve NFT
-    Devolve {
-        token_id: String,
-        /// Need to pick specific NFT for conditions that token_id is None
-        selected_nfts: Option<Vec<Token>>,
-    },
 }
 
 #[cw_serde]

@@ -6,8 +6,8 @@ use crate::state::{
 };
 use crate::Metadata;
 use cosmwasm_std::{
-    to_binary, CosmosMsg, DepsMut, Empty, Env, MessageInfo, Response, StdError,
-    StdResult, Storage, WasmMsg,
+    to_binary, CosmosMsg, DepsMut, Empty, Env, MessageInfo, Response, StdError, StdResult, Storage,
+    WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::Cw20ExecuteMsg;
@@ -272,8 +272,7 @@ pub fn devolve(
         )));
     }
 
-    let evolved_metadata =
-        EVOLVED_META_DATA.load(deps.storage, (&token_id, evolved_stage))?;
+    let evolved_metadata = EVOLVED_META_DATA.load(deps.storage, (&token_id, evolved_stage))?;
 
     let fee_send_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: evolved_metadata.evolution_fee.fee_token.to_string(),
@@ -285,8 +284,7 @@ pub fn devolve(
         funds: vec![],
     });
 
-    let new_meatadata =
-        EVOLVED_META_DATA.load(deps.storage, (&token_id, (evolved_stage - 1)))?;
+    let new_meatadata = EVOLVED_META_DATA.load(deps.storage, (&token_id, (evolved_stage - 1)))?;
 
     let EvolutionMetaData::<Metadata> {
         token_uri,
@@ -330,8 +328,7 @@ pub fn devolve(
             }
         }
         withdraw_msgs.push(
-            withdraw(deps.storage, &token_id, withdraw_token)?
-                .into_send_msg(owner.to_string())?,
+            withdraw(deps.storage, &token_id, withdraw_token)?.into_send_msg(owner.to_string())?,
         )
     }
 
@@ -522,7 +519,9 @@ fn withdraw(
         // check hold
         let hold = HOLDS.may_load(storage, key.clone())?;
         if hold.is_none() {
-            return Err(StdError::generic_err("Can't withdraw nft not held by token_id")); 
+            return Err(StdError::generic_err(
+                "Can't withdraw nft not held by token_id",
+            ));
         }
         HOLDS.remove(storage, key)
     }

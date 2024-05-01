@@ -3,9 +3,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage};
+use cosmwasm_std::{Addr, BlockInfo, CustomMsg, StdResult, Storage};
 
-use cw721::{ContractInfoResponse, CustomMsg, Cw721, Expiration};
+use cw721::{ContractInfoResponse, Cw721, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 
 pub struct Cw721Contract<'a, T, C, E, Q>
@@ -15,11 +15,11 @@ where
     E: CustomMsg,
 {
     pub contract_info: Item<'a, ContractInfoResponse>,
-    pub minter: Item<'a, Addr>,
     pub token_count: Item<'a, u64>,
     /// Stored as (granter, operator) giving operator full control over granter's account
     pub operators: Map<'a, (&'a Addr, &'a Addr), Expiration>,
     pub tokens: IndexedMap<'a, &'a str, TokenInfo<T>, TokenIndexes<'a, T>>,
+    pub withdraw_address: Item<'a, String>,
 
     pub(crate) _custom_response: PhantomData<C>,
     pub(crate) _custom_query: PhantomData<Q>,
@@ -45,11 +45,11 @@ where
     fn default() -> Self {
         Self::new(
             "nft_info",
-            "minter",
             "num_tokens",
             "operators",
             "tokens",
             "tokens__owner",
+            "withdraw_address",
         )
     }
 }
@@ -62,21 +62,21 @@ where
 {
     fn new(
         contract_key: &'a str,
-        minter_key: &'a str,
         token_count_key: &'a str,
         operator_key: &'a str,
         tokens_key: &'a str,
         tokens_owner_key: &'a str,
+        withdraw_address_key: &'a str,
     ) -> Self {
         let indexes = TokenIndexes {
             owner: MultiIndex::new(token_owner_idx, tokens_key, tokens_owner_key),
         };
         Self {
             contract_info: Item::new(contract_key),
-            minter: Item::new(minter_key),
             token_count: Item::new(token_count_key),
             operators: Map::new(operator_key),
             tokens: IndexedMap::new(tokens_key, indexes),
+            withdraw_address: Item::new(withdraw_address_key),
             _custom_response: PhantomData,
             _custom_execute: PhantomData,
             _custom_query: PhantomData,
@@ -147,6 +147,6 @@ where
     }
 }
 
-pub fn token_owner_idx<T>(d: &TokenInfo<T>) -> Addr {
+pub fn token_owner_idx<T>(_pk: &[u8], d: &TokenInfo<T>) -> Addr {
     d.owner.clone()
 }

@@ -1,18 +1,16 @@
+use cw_ownable::OwnershipError;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    Addr, BankMsg, Binary, Coin, CustomMsg, Deps, DepsMut, Env, MessageInfo, Response, Storage,
+};
 
-use cw2::set_contract_version;
-use cw721::{ContractInfoResponse, CustomMsg, Cw721Execute, Cw721ReceiveMsg, Expiration};
+use cw721::{ContractInfoResponse, Cw721Execute, Cw721ReceiveMsg, Expiration};
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, MintMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg};
 use crate::state::{Approval, Cw721Contract, TokenInfo};
-
-// Version info for migration
-const CONTRACT_NAME: &str = "crates.io:cw721-base";
-const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl<'a, T, C, E, Q> Cw721Contract<'a, T, C, E, Q>
 where
@@ -25,18 +23,25 @@ where
         &self,
         deps: DepsMut,
         _env: Env,
-        _info: MessageInfo,
+        info: MessageInfo,
         msg: InstantiateMsg,
-    ) -> StdResult<Response<C>> {
-        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-
-        let info = ContractInfoResponse {
+    ) -> Result<Response<C>, ContractError> {
+        let contract_info = ContractInfoResponse {
             name: msg.name,
             symbol: msg.symbol,
         };
-        self.contract_info.save(deps.storage, &info)?;
-        let minter = deps.api.addr_validate(&msg.minter)?;
-        self.minter.save(deps.storage, &minter)?;
+        self.contract_info.save(deps.storage, &contract_info)?;
+
+        let owner = match msg.minter {
+            Some(owner) => deps.api.addr_validate(&owner)?,
+            None => info.sender,
+        };
+        cw_ownable::initialize_owner(deps.storage, deps.api, Some(owner.as_ref()))?;
+
+        if let Some(address) = msg.withdraw_address {
+            self.set_withdraw_address(deps, &owner, address)?;
+        }
+
         Ok(Response::default())
     }
 
@@ -48,7 +53,12 @@ where
         msg: ExecuteMsg<T, E>,
     ) -> Result<Response<C>, ContractError> {
         match msg {
-            ExecuteMsg::Mint(msg) => self.mint(deps, env, info, msg),
+            ExecuteMsg::Mint {
+                token_id,
+                owner,
+                token_uri,
+                extension,
+            } => self.mint(deps, info, token_id, owner, token_uri, extension),
             ExecuteMsg::Approve {
                 spender,
                 token_id,
@@ -71,7 +81,15 @@ where
                 msg,
             } => self.send_nft(deps, env, info, contract, token_id, msg),
             ExecuteMsg::Burn { token_id } => self.burn(deps, env, info, token_id),
+            ExecuteMsg::UpdateOwnership(action) => Self::update_ownership(deps, env, info, action),
             ExecuteMsg::Extension { msg: _ } => Ok(Response::default()),
+            ExecuteMsg::SetWithdrawAddress { address } => {
+                self.set_withdraw_address(deps, &info.sender, address)
+            }
+            ExecuteMsg::RemoveWithdrawAddress {} => {
+                self.remove_withdraw_address(deps.storage, &info.sender)
+            }
+            ExecuteMsg::WithdrawFunds { amount } => self.withdraw_funds(deps.storage, &amount),
         }
     }
 }
@@ -87,25 +105,23 @@ where
     pub fn mint(
         &self,
         deps: DepsMut,
-        _env: Env,
         info: MessageInfo,
-        msg: MintMsg<T>,
+        token_id: String,
+        owner: String,
+        token_uri: Option<String>,
+        extension: T,
     ) -> Result<Response<C>, ContractError> {
-        let minter = self.minter.load(deps.storage)?;
-
-        if info.sender != minter {
-            return Err(ContractError::Unauthorized {});
-        }
+        cw_ownable::assert_owner(deps.storage, &info.sender)?;
 
         // create the token
         let token = TokenInfo {
-            owner: deps.api.addr_validate(&msg.owner)?,
+            owner: deps.api.addr_validate(&owner)?,
             approvals: vec![],
-            token_uri: msg.token_uri,
-            extension: msg.extension,
+            token_uri,
+            extension,
         };
         self.tokens
-            .update(deps.storage, &msg.token_id, |old| match old {
+            .update(deps.storage, &token_id, |old| match old {
                 Some(_) => Err(ContractError::Claimed {}),
                 None => Ok(token),
             })?;
@@ -115,8 +131,72 @@ where
         Ok(Response::new()
             .add_attribute("action", "mint")
             .add_attribute("minter", info.sender)
-            .add_attribute("owner", msg.owner)
-            .add_attribute("token_id", msg.token_id))
+            .add_attribute("owner", owner)
+            .add_attribute("token_id", token_id))
+    }
+
+    pub fn update_ownership(
+        deps: DepsMut,
+        env: Env,
+        info: MessageInfo,
+        action: cw_ownable::Action,
+    ) -> Result<Response<C>, ContractError> {
+        let ownership = cw_ownable::update_ownership(deps, &env.block, &info.sender, action)?;
+        Ok(Response::new().add_attributes(ownership.into_attributes()))
+    }
+
+    pub fn set_withdraw_address(
+        &self,
+        deps: DepsMut,
+        sender: &Addr,
+        address: String,
+    ) -> Result<Response<C>, ContractError> {
+        cw_ownable::assert_owner(deps.storage, sender)?;
+        deps.api.addr_validate(&address)?;
+        self.withdraw_address.save(deps.storage, &address)?;
+        Ok(Response::new()
+            .add_attribute("action", "set_withdraw_address")
+            .add_attribute("address", address))
+    }
+
+    pub fn remove_withdraw_address(
+        &self,
+        storage: &mut dyn Storage,
+        sender: &Addr,
+    ) -> Result<Response<C>, ContractError> {
+        cw_ownable::assert_owner(storage, sender)?;
+        let address = self.withdraw_address.may_load(storage)?;
+        match address {
+            Some(address) => {
+                self.withdraw_address.remove(storage);
+                Ok(Response::new()
+                    .add_attribute("action", "remove_withdraw_address")
+                    .add_attribute("address", address))
+            }
+            None => Err(ContractError::NoWithdrawAddress {}),
+        }
+    }
+
+    pub fn withdraw_funds(
+        &self,
+        storage: &mut dyn Storage,
+        amount: &Coin,
+    ) -> Result<Response<C>, ContractError> {
+        let address = self.withdraw_address.may_load(storage)?;
+        match address {
+            Some(address) => {
+                let msg = BankMsg::Send {
+                    to_address: address,
+                    amount: vec![amount.clone()],
+                };
+                Ok(Response::new()
+                    .add_message(msg)
+                    .add_attribute("action", "withdraw_funds")
+                    .add_attribute("amount", amount.amount.to_string())
+                    .add_attribute("denom", amount.denom.to_string()))
+            }
+            None => Err(ContractError::NoWithdrawAddress {}),
+        }
     }
 }
 
@@ -314,11 +394,7 @@ where
 
         // update the approval list (remove any for the same spender before adding)
         let spender_addr = deps.api.addr_validate(spender)?;
-        token.approvals = token
-            .approvals
-            .into_iter()
-            .filter(|apr| apr.spender != spender_addr)
-            .collect();
+        token.approvals.retain(|apr| apr.spender != spender_addr);
 
         // only difference between approve and revoke
         if add {
@@ -358,12 +434,12 @@ where
         match op {
             Some(ex) => {
                 if ex.is_expired(&env.block) {
-                    Err(ContractError::Unauthorized {})
+                    Err(ContractError::Ownership(OwnershipError::NotOwner))
                 } else {
                     Ok(())
                 }
             }
-            None => Err(ContractError::Unauthorized {}),
+            None => Err(ContractError::Ownership(OwnershipError::NotOwner)),
         }
     }
 
@@ -396,12 +472,12 @@ where
         match op {
             Some(ex) => {
                 if ex.is_expired(&env.block) {
-                    Err(ContractError::Unauthorized {})
+                    Err(ContractError::Ownership(OwnershipError::NotOwner))
                 } else {
                     Ok(())
                 }
             }
-            None => Err(ContractError::Unauthorized {}),
+            None => Err(ContractError::Ownership(OwnershipError::NotOwner)),
         }
     }
 }

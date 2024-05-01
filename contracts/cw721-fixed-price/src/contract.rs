@@ -6,14 +6,14 @@ use crate::state::{Config, CONFIG};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, MessageInfo, Reply, ReplyOn, Response,
+    to_json_binary, Addr, Binary, Deps, DepsMut, Empty, Env, MessageInfo, Reply, ReplyOn, Response,
     StdResult, SubMsg, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::Cw20ReceiveMsg;
 use cw721_base::{
     helpers::Cw721Contract, msg::ExecuteMsg as Cw721ExecuteMsg,
-    msg::InstantiateMsg as Cw721InstantiateMsg, Extension, MintMsg,
+    msg::InstantiateMsg as Cw721InstantiateMsg,
 };
 use cw_utils::parse_reply_instantiate_data;
 
@@ -26,7 +26,7 @@ const INSTANTIATE_TOKEN_REPLY_ID: u64 = 1;
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
@@ -58,10 +58,11 @@ pub fn instantiate(
     let sub_msg: Vec<SubMsg> = vec![SubMsg {
         msg: WasmMsg::Instantiate {
             code_id: msg.token_code_id,
-            msg: to_binary(&Cw721InstantiateMsg {
+            msg: to_json_binary(&Cw721InstantiateMsg {
                 name: msg.name.clone(),
                 symbol: msg.symbol,
-                minter: env.contract.address.to_string(),
+                minter: None,
+                withdraw_address: msg.withdraw_address,
             })?,
             funds: vec![],
             admin: None,
@@ -81,7 +82,7 @@ pub fn instantiate(
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
     let mut config: Config = CONFIG.load(deps.storage)?;
 
-    if config.cw721_address != None {
+    if config.cw721_address.is_some() {
         return Err(ContractError::Cw721AlreadyLinked {});
     }
 
@@ -99,7 +100,7 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetConfig {} => to_binary(&query_config(deps)?),
+        QueryMsg::GetConfig {} => to_json_binary(&query_config(deps)?),
     }
 }
 
@@ -147,7 +148,7 @@ pub fn execute_receive(
         return Err(ContractError::UnauthorizedTokenContract {});
     }
 
-    if config.cw721_address == None {
+    if config.cw721_address.is_none() {
         return Err(ContractError::Uninitialized {});
     }
 
@@ -159,12 +160,12 @@ pub fn execute_receive(
         return Err(ContractError::WrongPaymentAmount {});
     }
 
-    let mint_msg = Cw721ExecuteMsg::<Extension, Empty>::Mint(MintMsg::<Extension> {
+    let mint_msg = Cw721ExecuteMsg::<_, Empty>::Mint {
         token_id: config.unused_token_id.to_string(),
         owner: sender,
         token_uri: config.token_uri.clone().into(),
         extension: config.extension.clone(),
-    });
+    };
 
     match config.cw721_address.clone() {
         Some(cw721) => {
@@ -183,7 +184,8 @@ pub fn execute_receive(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{from_binary, to_binary, CosmosMsg, SubMsgResponse, SubMsgResult};
+    use cosmwasm_std::{from_json, to_json_binary, CosmosMsg, SubMsgResponse, SubMsgResult};
+    use cw721_base::Extension;
     use prost::Message;
 
     const NFT_CONTRACT_ADDR: &str = "nftcontract";
@@ -210,6 +212,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -222,10 +225,11 @@ mod tests {
             vec![SubMsg {
                 msg: WasmMsg::Instantiate {
                     code_id: msg.token_code_id,
-                    msg: to_binary(&Cw721InstantiateMsg {
+                    msg: to_json_binary(&Cw721InstantiateMsg {
                         name: msg.name.clone(),
                         symbol: msg.symbol.clone(),
-                        minter: MOCK_CONTRACT_ADDR.to_string(),
+                        minter: None,
+                        withdraw_address: None,
                     })
                     .unwrap(),
                     funds: vec![],
@@ -260,7 +264,7 @@ mod tests {
 
         let query_msg = QueryMsg::GetConfig {};
         let res = query(deps.as_ref(), mock_env(), query_msg).unwrap();
-        let config: Config = from_binary(&res).unwrap();
+        let config: Config = from_json(res).unwrap();
         assert_eq!(
             config,
             Config {
@@ -291,6 +295,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -298,7 +303,7 @@ mod tests {
 
         match err {
             ContractError::InvalidUnitPrice {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -315,6 +320,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -322,7 +328,7 @@ mod tests {
 
         match err {
             ContractError::InvalidMaxTokens {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -339,6 +345,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -371,19 +378,19 @@ mod tests {
         let info = mock_info(MOCK_CONTRACT_ADDR, &[]);
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
-        let mint_msg = Cw721ExecuteMsg::<Extension, Empty>::Mint(MintMsg::<Extension> {
+        let mint_msg = Cw721ExecuteMsg::<Extension, Empty>::Mint {
             token_id: String::from("0"),
             owner: String::from("minter"),
             token_uri: Some(String::from("https://ipfs.io/ipfs/Q")),
             extension: None,
-        });
+        };
 
         assert_eq!(
             res.messages[0],
             SubMsg {
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: NFT_CONTRACT_ADDR.to_string(),
-                    msg: to_binary(&mint_msg).unwrap(),
+                    msg: to_json_binary(&mint_msg).unwrap(),
                     funds: vec![],
                 }),
                 id: 0,
@@ -406,6 +413,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -430,7 +438,7 @@ mod tests {
         let err = reply(deps.as_mut(), mock_env(), reply_msg).unwrap_err();
         match err {
             ContractError::InvalidTokenReplyId {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -447,6 +455,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -473,7 +482,7 @@ mod tests {
         let err = reply(deps.as_mut(), mock_env(), reply_msg).unwrap_err();
         match err {
             ContractError::Cw721AlreadyLinked {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -490,6 +499,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -526,7 +536,7 @@ mod tests {
 
         match err {
             ContractError::SoldOut {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -544,6 +554,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -561,7 +572,7 @@ mod tests {
         let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
         match err {
             ContractError::Uninitialized {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -578,6 +589,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -615,7 +627,7 @@ mod tests {
 
         match err {
             ContractError::UnauthorizedTokenContract {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 
@@ -632,6 +644,7 @@ mod tests {
             cw20_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
             token_uri: String::from("https://ipfs.io/ipfs/Q"),
             extension: None,
+            withdraw_address: None,
         };
 
         let info = mock_info("owner", &[]);
@@ -669,7 +682,7 @@ mod tests {
 
         match err {
             ContractError::WrongPaymentAmount {} => {}
-            e => panic!("unexpected error: {}", e),
+            e => panic!("unexpected error: {e}"),
         }
     }
 }

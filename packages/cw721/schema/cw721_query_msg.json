@@ -25,7 +25,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -56,7 +57,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -83,7 +85,40 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Return approval of a given operator for all tokens of an owner, error if not set Return type: `OperatorResponse`",
+      "type": "object",
+      "required": [
+        "operator"
+      ],
+      "properties": {
+        "operator": {
+          "type": "object",
+          "required": [
+            "operator",
+            "owner"
+          ],
+          "properties": {
+            "include_expired": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "operator": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -125,7 +160,8 @@
                 "null"
               ]
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -138,7 +174,8 @@
       ],
       "properties": {
         "num_tokens": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -151,7 +188,8 @@
       ],
       "properties": {
         "contract_info": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -172,7 +210,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -200,7 +239,8 @@
             "token_id": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -235,7 +275,8 @@
                 "null"
               ]
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -264,7 +305,8 @@
                 "null"
               ]
             }
-          }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

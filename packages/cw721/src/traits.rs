@@ -1,19 +1,12 @@
-use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::query::ApprovalResponse;
 use crate::{
-    AllNftInfoResponse, ApprovalsResponse, ContractInfoResponse, NftInfoResponse,
-    NumTokensResponse, OperatorsResponse, OwnerOfResponse, TokensResponse,
+    AllNftInfoResponse, ApprovalResponse, ApprovalsResponse, ContractInfoResponse, NftInfoResponse,
+    NumTokensResponse, OperatorResponse, OperatorsResponse, OwnerOfResponse, TokensResponse,
 };
-use cosmwasm_std::{Binary, Deps, DepsMut, Empty, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{Binary, CustomMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
 use cw_utils::Expiration;
-
-// TODO: move this somewhere else... ideally cosmwasm-std
-pub trait CustomMsg: Clone + std::fmt::Debug + PartialEq + JsonSchema {}
-
-impl CustomMsg for Empty {}
 
 pub trait Cw721<T, C>: Cw721Execute<T, C> + Cw721Query<T>
 where
@@ -113,6 +106,15 @@ where
         token_id: String,
         include_expired: bool,
     ) -> StdResult<OwnerOfResponse>;
+
+    fn operator(
+        &self,
+        deps: Deps,
+        env: Env,
+        owner: String,
+        operator: String,
+        include_expired: bool,
+    ) -> StdResult<OperatorResponse>;
 
     fn operators(
         &self,

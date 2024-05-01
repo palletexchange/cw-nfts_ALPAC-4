@@ -1,13 +1,17 @@
 use cosmwasm_std::StdError;
+use cw_ownable::OwnershipError;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ContractError {
-    #[error("{0}")]
+    #[error(transparent)]
     Std(#[from] StdError),
 
-    #[error("Unauthorized")]
-    Unauthorized {},
+    #[error(transparent)]
+    Ownership(#[from] OwnershipError),
+
+    #[error(transparent)]
+    Version(#[from] cw2::VersionError),
 
     #[error("token_id already claimed")]
     Claimed {},
@@ -17,4 +21,7 @@ pub enum ContractError {
 
     #[error("Approval not found for: {spender}")]
     ApprovalNotFound { spender: String },
+
+    #[error("No withdraw address set")]
+    NoWithdrawAddress {},
 }

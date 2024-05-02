@@ -7,8 +7,9 @@ use cosmwasm_std::{
 };
 
 use cw1155::{
-    ApproveAllEvent, Balance, BurnEvent, Cw1155BatchReceiveMsg, Cw1155ContractError,
-    Cw1155ReceiveMsg, Expiration, MintEvent, RevokeAllEvent, TokenAmount, TransferEvent,
+    ApproveAllEvent, ApproveEvent, Balance, BurnEvent, Cw1155BatchReceiveMsg, Cw1155ContractError,
+    Cw1155ReceiveMsg, Expiration, MintEvent, RevokeAllEvent, RevokeEvent, TokenAmount,
+    TransferEvent,
 };
 use cw2::set_contract_version;
 
@@ -62,9 +63,20 @@ where
             } => self.batch_send_from(env, from, to, batch, msg),
             ExecuteMsg::Burn { token_id, amount } => self.burn(env, token_id, amount),
             ExecuteMsg::BatchBurn { batch } => self.batch_burn(env, batch),
+            ExecuteMsg::Approve {
+                spender,
+                token_id,
+                amount,
+                expires,
+            } => self.approve_token(env, spender, token_id, amount, expires),
             ExecuteMsg::ApproveAll { operator, expires } => {
                 self.approve_all(env, operator, expires)
             }
+            ExecuteMsg::Revoke {
+                spender,
+                token_id,
+                amount,
+            } => self.revoke_token(env, spender, token_id, amount),
             ExecuteMsg::RevokeAll { operator } => self.revoke_all(env, operator),
         }
     }
@@ -277,6 +289,48 @@ where
         Ok(rsp)
     }
 
+    pub fn approve_token(
+        &self,
+        env: ExecuteEnv,
+        operator: String,
+        token_id: String,
+        amount: Option<Uint128>,
+        expiration: Option<Expiration>,
+    ) -> Result<Response, Cw1155ContractError> {
+        let ExecuteEnv { deps, info, env } = env;
+
+        // reject expired data as invalid
+        let expiration = expiration.unwrap_or_default();
+        if expiration.is_expired(&env.block) {
+            return Err(Cw1155ContractError::Expired {});
+        }
+
+        // get sender's token balance to get valid approval amount
+        let balance = self
+            .balances
+            .load(deps.storage, (info.sender.clone(), token_id.to_string()))?;
+        let approval_amount = amount.unwrap_or(Uint128::MAX).min(balance.amount);
+
+        // store the approval
+        let operator = deps.api.addr_validate(&operator)?;
+        let token_key = TokenKey::new(&env, &token_id);
+        self.token_approves.save(
+            deps.storage,
+            (&token_key, &info.sender, &operator),
+            &TokenApproval {
+                amount: approval_amount,
+                expiration,
+            },
+        )?;
+
+        let mut rsp = Response::default();
+
+        let event = ApproveEvent::new(&info.sender, &operator, &token_id, approval_amount).into();
+        rsp = rsp.add_event(event);
+
+        Ok(rsp)
+    }
+
     pub fn approve_all(
         &self,
         env: ExecuteEnv,
@@ -299,6 +353,47 @@ where
         let mut rsp = Response::default();
 
         let event = ApproveAllEvent::new(&info.sender, &operator).into();
+        rsp = rsp.add_event(event);
+
+        Ok(rsp)
+    }
+
+    pub fn revoke_token(
+        &self,
+        env: ExecuteEnv,
+        operator: String,
+        token_id: String,
+        amount: Option<Uint128>,
+    ) -> Result<Response, Cw1155ContractError> {
+        let ExecuteEnv { deps, info, env } = env;
+        let operator = deps.api.addr_validate(&operator)?;
+
+        // get prev approval amount to get valid revoke amount
+        let nft_key = TokenKey::new(&env, &token_id);
+        let prev_approval = self
+            .token_approves
+            .load(deps.storage, (&nft_key, &info.sender, &operator))?;
+        let revoke_amount = amount.unwrap_or(Uint128::MAX).min(prev_approval.amount);
+
+        // remove or update approval
+        if revoke_amount == prev_approval.amount {
+            self.token_approves
+                .remove(deps.storage, (&nft_key, &info.sender, &operator));
+        } else {
+            self.token_approves.update(
+                deps.storage,
+                (&nft_key, &info.sender, &operator),
+                |prev| -> StdResult<_> {
+                    let mut new_approval = prev.unwrap();
+                    new_approval.amount = new_approval.amount.checked_sub(revoke_amount)?;
+                    Ok(new_approval)
+                },
+            )?;
+        }
+
+        let mut rsp = Response::default();
+
+        let event = RevokeEvent::new(&info.sender, &operator, &token_id, revoke_amount).into();
         rsp = rsp.add_event(event);
 
         Ok(rsp)

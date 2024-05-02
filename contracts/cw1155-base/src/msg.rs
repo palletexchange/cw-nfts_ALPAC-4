@@ -43,6 +43,22 @@ pub enum ExecuteMsg<T> {
     Burn { token_id: String, amount: Uint128 },
     /// BatchBurn is a base message to burn multiple types of tokens in batch.
     BatchBurn { batch: Vec<TokenAmount> },
+    /// Allows operator to transfer / send the token from the owner's account.
+    /// If expiration is set, then this allowance has a time/height limit
+    Approve {
+        spender: String,
+        token_id: String,
+        /// Optional amount to approve. If None, approve entire balance.
+        amount: Option<Uint128>,
+        expires: Option<Expiration>,
+    },
+    /// Remove previously granted Approval
+    Revoke {
+        spender: String,
+        token_id: String,
+        /// Optional amount to revoke. If None, revoke entire amount.
+        amount: Option<Uint128>,
+    },
     /// Allows operator to transfer / send any token from the owner's account.
     /// If expiration is set, then this allowance has a time/height limit
     ApproveAll {

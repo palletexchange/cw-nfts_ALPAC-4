@@ -2,7 +2,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use cosmwasm_std::{
-    Addr, Binary, DepsMut, Env, Event, MessageInfo, Response, StdResult, Storage, SubMsg, Uint128,
+    Addr, Binary, DepsMut, Env, Event, MessageInfo, Order, Response, StdResult, Storage, SubMsg,
+    Uint128,
 };
 
 use cw1155::{
@@ -12,7 +13,7 @@ use cw1155::{
 use cw2::set_contract_version;
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, MintMsg};
-use crate::state::{Cw1155Contract, TokenInfo};
+use crate::state::{Cw1155Contract, TokenApproval, TokenInfo, TokenKey};
 
 // Version info for migration
 const CONTRACT_NAME: &str = "crates.io:cw721-base";
@@ -82,7 +83,11 @@ where
     T: Serialize + DeserializeOwned + Clone,
 {
     pub fn mint(&self, env: ExecuteEnv, msg: MintMsg<T>) -> Result<Response, Cw1155ContractError> {
-        let ExecuteEnv { mut deps, info, .. } = env;
+        let ExecuteEnv {
+            mut deps,
+            info,
+            env,
+        } = env;
         let to_addr = deps.api.addr_validate(&msg.to)?;
 
         if info.sender != self.minter.load(deps.storage)? {
@@ -93,6 +98,7 @@ where
 
         let event = self.update_transfer_state(
             &mut deps,
+            &env,
             None,
             Some(to_addr),
             vec![TokenAmount {
@@ -144,6 +150,7 @@ where
 
         let event = self.update_transfer_state(
             &mut deps,
+            &env,
             Some(from.clone()),
             Some(to.clone()),
             vec![TokenAmount {
@@ -191,6 +198,7 @@ where
         let mut rsp = Response::default();
         let event = self.update_transfer_state(
             &mut deps,
+            &env,
             Some(from.clone()),
             Some(to.clone()),
             batch.to_vec(),
@@ -234,6 +242,7 @@ where
 
         let event = self.update_transfer_state(
             &mut deps,
+            &env,
             Some(from.clone()),
             None,
             vec![TokenAmount {
@@ -262,7 +271,7 @@ where
         let batch = self.verify_approvals(deps.storage, &env, &info, from, batch)?;
 
         let mut rsp = Response::default();
-        let event = self.update_transfer_state(&mut deps, Some(from.clone()), None, batch)?;
+        let event = self.update_transfer_state(&mut deps, &env, Some(from.clone()), None, batch)?;
         rsp = rsp.add_event(event);
 
         Ok(rsp)
@@ -321,6 +330,7 @@ where
     fn update_transfer_state(
         &self,
         deps: &mut DepsMut,
+        env: &Env,
         from: Option<Addr>,
         to: Option<Addr>,
         tokens: Vec<TokenAmount>,
@@ -363,14 +373,30 @@ where
         }
 
         let event = if let Some(from) = &from {
+            for TokenAmount { token_id, amount } in &tokens {
+                // remove token approvals
+                let token_key = TokenKey::new(env, token_id);
+                for operator in self
+                    .token_approves
+                    .prefix((&token_key, from))
+                    .keys(deps.storage, None, None, Order::Ascending)
+                    .collect::<StdResult<Vec<_>>>()?
+                {
+                    self.token_approves
+                        .remove(deps.storage, (&token_key, &from, &operator));
+                }
+
+                // decrement tokens if burning
+                if to.is_none() {
+                    self.decrement_tokens(deps.storage, token_id, amount)?;
+                }
+            }
+
             if let Some(to) = &to {
                 // transfer
                 TransferEvent::new(from, to, tokens).into()
             } else {
                 // burn
-                for TokenAmount { token_id, amount } in &tokens {
-                    self.decrement_tokens(deps.storage, token_id, amount)?;
-                }
                 BurnEvent::new(from, tokens).into()
             }
         } else if let Some(to) = &to {
@@ -401,18 +427,25 @@ where
         let owner_balance = self
             .balances
             .load(storage, (owner.clone(), token_id.to_string()))?;
-        let balance_update = TokenAmount {
+        let mut balance_update = TokenAmount {
             token_id: token_id.to_string(),
             amount: owner_balance.amount.min(amount),
         };
 
-        // todo - logic for checking approval on specific token
-        // owner or operator can approve
+        // owner or all operator can execute
         if owner == operator || self.verify_all_approval(storage, env, owner, operator) {
-            Ok(balance_update)
-        } else {
-            Err(Cw1155ContractError::Unauthorized {})
+            return Ok(balance_update);
         }
+
+        // token operator can execute up to approved amount
+        if let Some(token_approval) =
+            self.get_active_token_approval(storage, env, owner, operator, token_id)
+        {
+            balance_update.amount = balance_update.amount.min(token_approval.amount);
+            return Ok(balance_update);
+        }
+
+        Err(Cw1155ContractError::Unauthorized {})
     }
 
     /// returns valid token amounts if the sender can execute or is approved to execute on all provided tokens
@@ -442,6 +475,27 @@ where
         match self.approves.load(storage, (owner, operator)) {
             Ok(ex) => !ex.is_expired(&env.block),
             Err(_) => false,
+        }
+    }
+
+    pub fn get_active_token_approval(
+        &self,
+        storage: &dyn Storage,
+        env: &Env,
+        owner: &Addr,
+        operator: &Addr,
+        token_id: &str,
+    ) -> Option<TokenApproval> {
+        let key = TokenKey::new(env, token_id);
+        match self.token_approves.load(storage, (&key, owner, operator)) {
+            Ok(approval) => {
+                if !approval.expiration.is_expired(&env.block) {
+                    Some(approval)
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
         }
     }
 }

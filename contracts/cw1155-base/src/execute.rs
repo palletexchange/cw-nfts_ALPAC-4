@@ -376,14 +376,26 @@ where
             for TokenAmount { token_id, amount } in &tokens {
                 // remove token approvals
                 let token_key = TokenKey::new(env, token_id);
-                for operator in self
+                for (operator, approval) in self
                     .token_approves
                     .prefix((&token_key, from))
-                    .keys(deps.storage, None, None, Order::Ascending)
+                    .range(deps.storage, None, None, Order::Ascending)
                     .collect::<StdResult<Vec<_>>>()?
                 {
-                    self.token_approves
-                        .remove(deps.storage, (&token_key, &from, &operator));
+                    if approval.expiration.is_expired(&env.block) || approval.amount <= *amount {
+                        self.token_approves
+                            .remove(deps.storage, (&token_key, &from, &operator));
+                    } else {
+                        self.token_approves.update(
+                            deps.storage,
+                            (&token_key, &from, &operator),
+                            |prev| -> StdResult<_> {
+                                let mut new_approval = prev.unwrap();
+                                new_approval.amount = new_approval.amount.checked_sub(*amount)?;
+                                Ok(new_approval)
+                            },
+                        )?;
+                    }
                 }
 
                 // decrement tokens if burning

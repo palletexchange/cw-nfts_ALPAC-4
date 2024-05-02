@@ -130,6 +130,12 @@ pub struct TokenApproval {
     pub expiration: Expiration,
 }
 
+impl TokenApproval {
+    pub fn is_expired(&self, env: &Env) -> bool {
+        self.expiration.is_expired(&env.block)
+    }
+}
+
 #[cw_serde]
 pub struct TokenKey {
     pub address: Addr,

@@ -11,7 +11,7 @@ use cw1155::{
 use cw_storage_plus::Bound;
 use cw_utils::maybe_addr;
 
-use crate::state::Cw1155Contract;
+use crate::state::{Cw1155Contract, TokenKey};
 
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 100;
@@ -66,6 +66,28 @@ where
             Cw1155QueryMsg::NumTokens { token_id } => {
                 let count = self.token_count(deps.storage, &token_id)?;
                 to_json_binary(&NumTokensResponse { count })
+            }
+            Cw1155QueryMsg::Approvals {
+                owner,
+                token_id,
+                include_expired,
+            } => {
+                let token_key = TokenKey::new(&env, &token_id);
+                let owner = deps.api.addr_validate(&owner)?;
+                let approvals = self
+                    .token_approves
+                    .prefix((&token_key, &owner))
+                    .range(deps.storage, None, None, Order::Ascending)
+                    .filter_map(|approval| {
+                        let (_, approval) = approval.unwrap();
+                        if include_expired.unwrap_or(false) || !approval.is_expired(&env) {
+                            Some(approval)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                to_json_binary(&approvals)
             }
             Cw1155QueryMsg::ApprovedForAll {
                 owner,

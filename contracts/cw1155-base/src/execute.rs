@@ -369,20 +369,20 @@ where
         let operator = deps.api.addr_validate(&operator)?;
 
         // get prev approval amount to get valid revoke amount
-        let nft_key = TokenKey::new(&env, &token_id);
+        let token_key = TokenKey::new(&env, &token_id);
         let prev_approval = self
             .token_approves
-            .load(deps.storage, (&nft_key, &info.sender, &operator))?;
+            .load(deps.storage, (&token_key, &info.sender, &operator))?;
         let revoke_amount = amount.unwrap_or(Uint128::MAX).min(prev_approval.amount);
 
         // remove or update approval
         if revoke_amount == prev_approval.amount {
             self.token_approves
-                .remove(deps.storage, (&nft_key, &info.sender, &operator));
+                .remove(deps.storage, (&token_key, &info.sender, &operator));
         } else {
             self.token_approves.update(
                 deps.storage,
-                (&nft_key, &info.sender, &operator),
+                (&token_key, &info.sender, &operator),
                 |prev| -> StdResult<_> {
                     let mut new_approval = prev.unwrap();
                     new_approval.amount = new_approval.amount.checked_sub(revoke_amount)?;
@@ -477,7 +477,7 @@ where
                     .range(deps.storage, None, None, Order::Ascending)
                     .collect::<StdResult<Vec<_>>>()?
                 {
-                    if approval.expiration.is_expired(&env.block) || approval.amount <= *amount {
+                    if approval.is_expired(&env) || approval.amount <= *amount {
                         self.token_approves
                             .remove(deps.storage, (&token_key, &from, &operator));
                     } else {
@@ -596,7 +596,7 @@ where
         let key = TokenKey::new(env, token_id);
         match self.token_approves.load(storage, (&key, owner, operator)) {
             Ok(approval) => {
-                if !approval.expiration.is_expired(&env.block) {
+                if !approval.is_expired(&env) {
                     Some(approval)
                 } else {
                     None

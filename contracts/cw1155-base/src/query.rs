@@ -11,7 +11,7 @@ use cw1155::{
 use cw_storage_plus::Bound;
 use cw_utils::maybe_addr;
 
-use crate::state::{Cw1155Contract, TokenKey};
+use crate::state::Cw1155Contract;
 
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 100;
@@ -72,11 +72,10 @@ where
                 token_id,
                 include_expired,
             } => {
-                let token_key = TokenKey::new(&env, &token_id);
                 let owner = deps.api.addr_validate(&owner)?;
                 let approvals = self
                     .token_approves
-                    .prefix((&token_key, &owner))
+                    .prefix((&token_id, &owner))
                     .range(deps.storage, None, None, Order::Ascending)
                     .filter_map(|approval| {
                         let (_, approval) = approval.unwrap();

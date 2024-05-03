@@ -5,11 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::{Addr, Env, StdResult, Storage, Uint128};
 
-use crate::CW_ADDRESS_LENGTH;
 use cw1155::{Balance, Expiration};
-use cw_storage_plus::{
-    Index, IndexList, IndexedMap, Item, Key, KeyDeserialize, Map, MultiIndex, Prefixer, PrimaryKey,
-};
+use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 
 pub struct Cw1155Contract<'a, T>
 where
@@ -22,8 +19,8 @@ where
     pub balances: IndexedMap<'a, (Addr, String), Balance, BalanceIndexes<'a>>,
     // key: (owner, spender)
     pub approves: Map<'a, (&'a Addr, &'a Addr), Expiration>,
-    // key: (token key, owner, spender)
-    pub token_approves: Map<'a, (&'a TokenKey, &'a Addr, &'a Addr), TokenApproval>,
+    // key: (token id, owner, spender)
+    pub token_approves: Map<'a, (&'a str, &'a Addr, &'a Addr), TokenApproval>,
     // key: token id
     pub tokens: Map<'a, &'a str, TokenInfo<T>>,
 }
@@ -133,52 +130,5 @@ pub struct TokenApproval {
 impl TokenApproval {
     pub fn is_expired(&self, env: &Env) -> bool {
         self.expiration.is_expired(&env.block)
-    }
-}
-
-#[cw_serde]
-pub struct TokenKey {
-    pub address: Addr,
-    pub token_id: String,
-}
-
-impl TokenKey {
-    pub fn new(env: &Env, token_id: &str) -> Self {
-        Self {
-            address: env.contract.address.clone(),
-            token_id: token_id.to_string(),
-        }
-    }
-}
-
-impl PrimaryKey<'_> for TokenKey {
-    type Prefix = Addr;
-    type SubPrefix = ();
-    type Suffix = String;
-    type SuperSuffix = (Addr, String);
-
-    fn key(&self) -> Vec<Key> {
-        let mut keys = self.address.key();
-        keys.extend(self.token_id.key());
-        keys
-    }
-}
-
-impl Prefixer<'_> for TokenKey {
-    fn prefix(&self) -> Vec<Key> {
-        self.key()
-    }
-}
-
-impl KeyDeserialize for TokenKey {
-    type Output = TokenKey;
-
-    fn from_vec(mut value: Vec<u8>) -> StdResult<Self::Output> {
-        let mut value = value.split_off(2); // remove padding
-        let token_id = value.split_off(CW_ADDRESS_LENGTH);
-        Ok(TokenKey {
-            address: Addr::from_vec(value)?,
-            token_id: String::from_vec(token_id)?,
-        })
     }
 }

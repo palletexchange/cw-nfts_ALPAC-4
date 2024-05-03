@@ -14,7 +14,7 @@ use cw1155::{
 use cw2::set_contract_version;
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, MintMsg};
-use crate::state::{Cw1155Contract, TokenApproval, TokenInfo, TokenKey};
+use crate::state::{Cw1155Contract, TokenApproval, TokenInfo};
 
 // Version info for migration
 const CONTRACT_NAME: &str = "crates.io:cw721-base";
@@ -313,10 +313,9 @@ where
 
         // store the approval
         let operator = deps.api.addr_validate(&operator)?;
-        let token_key = TokenKey::new(&env, &token_id);
         self.token_approves.save(
             deps.storage,
-            (&token_key, &info.sender, &operator),
+            (&token_id, &info.sender, &operator),
             &TokenApproval {
                 amount: approval_amount,
                 expiration,
@@ -365,24 +364,23 @@ where
         token_id: String,
         amount: Option<Uint128>,
     ) -> Result<Response, Cw1155ContractError> {
-        let ExecuteEnv { deps, info, env } = env;
+        let ExecuteEnv { deps, info, .. } = env;
         let operator = deps.api.addr_validate(&operator)?;
 
         // get prev approval amount to get valid revoke amount
-        let token_key = TokenKey::new(&env, &token_id);
         let prev_approval = self
             .token_approves
-            .load(deps.storage, (&token_key, &info.sender, &operator))?;
+            .load(deps.storage, (&token_id, &info.sender, &operator))?;
         let revoke_amount = amount.unwrap_or(Uint128::MAX).min(prev_approval.amount);
 
         // remove or update approval
         if revoke_amount == prev_approval.amount {
             self.token_approves
-                .remove(deps.storage, (&token_key, &info.sender, &operator));
+                .remove(deps.storage, (&token_id, &info.sender, &operator));
         } else {
             self.token_approves.update(
                 deps.storage,
-                (&token_key, &info.sender, &operator),
+                (&token_id, &info.sender, &operator),
                 |prev| -> StdResult<_> {
                     let mut new_approval = prev.unwrap();
                     new_approval.amount = new_approval.amount.checked_sub(revoke_amount)?;
@@ -470,20 +468,19 @@ where
         let event = if let Some(from) = &from {
             for TokenAmount { token_id, amount } in &tokens {
                 // remove token approvals
-                let token_key = TokenKey::new(env, token_id);
                 for (operator, approval) in self
                     .token_approves
-                    .prefix((&token_key, from))
+                    .prefix((&token_id, from))
                     .range(deps.storage, None, None, Order::Ascending)
                     .collect::<StdResult<Vec<_>>>()?
                 {
                     if approval.is_expired(&env) || approval.amount <= *amount {
                         self.token_approves
-                            .remove(deps.storage, (&token_key, &from, &operator));
+                            .remove(deps.storage, (&token_id, &from, &operator));
                     } else {
                         self.token_approves.update(
                             deps.storage,
-                            (&token_key, &from, &operator),
+                            (&token_id, &from, &operator),
                             |prev| -> StdResult<_> {
                                 let mut new_approval = prev.unwrap();
                                 new_approval.amount = new_approval.amount.checked_sub(*amount)?;
@@ -593,8 +590,10 @@ where
         operator: &Addr,
         token_id: &str,
     ) -> Option<TokenApproval> {
-        let key = TokenKey::new(env, token_id);
-        match self.token_approves.load(storage, (&key, owner, operator)) {
+        match self
+            .token_approves
+            .load(storage, (&token_id, owner, operator))
+        {
             Ok(approval) => {
                 if !approval.is_expired(&env) {
                     Some(approval)
